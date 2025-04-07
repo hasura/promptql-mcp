@@ -6,7 +6,7 @@ setup(
     author="Your Name",
     author_email="your.email@example.com",
     description="MCP server for PromptQL",
-    long_description=open("README.md").read(),
+    long_description = open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/yourusername/promptql-mcp-server",
     packages=find_packages(),
