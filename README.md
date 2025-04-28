@@ -25,7 +25,7 @@ This project provides a bridge between Hasura's PromptQL data agent and AI assis
 ### Install from Source
 
 ```bash
-git clone https://github.com/hasura/promptql-mcp-server.git
+git clone https://github.com/hasura/promptql-mcp.git
 cd promptql-mcp-server
 pip install -e .
 ```
