@@ -24,9 +24,23 @@ This project provides a bridge between Hasura's PromptQL data agent and AI assis
 
 ### Install from Source
 
+1. Clone the repository:
 ```bash
 git clone https://github.com/hasura/promptql-mcp.git
-cd promptql-mcp-server
+cd promptql-mcp
+```
+
+2. Set up a virtual environment (recommended):
+```bash
+# Create a virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install the package:
+```bash
 pip install -e .
 ```
 
@@ -35,7 +49,7 @@ pip install -e .
 1. Configure your PromptQL credentials:
 
 ```bash
-python -m promptql_mcp_server setup --api-key YOUR_API_KEY --ddn-url YOUR_DDN_URL
+python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --ddn-url YOUR_DDN_URL
 ```
 
 2. Test the server:
@@ -60,11 +74,31 @@ python examples/simple_client.py
 {
   "mcpServers": {
     "promptql": {
-      "command": "python",
+      "command": "/full/path/to/python",
       "args": ["-m", "promptql_mcp_server"]
     }
   }
 }
+```
+
+Replace `/full/path/to/python` with the actual path to your Python executable. 
+
+If you're using a virtual environment (recommended):
+```json
+{
+  "mcpServers": {
+    "promptql": {
+      "command": "/path/to/your/project/venv/bin/python",
+      "args": ["-m", "promptql_mcp_server"]
+    }
+  }
+}
+```
+
+To find your Python path, run:
+```bash
+which python  # On macOS/Linux
+where python  # On Windows
 ```
 
 4. Restart Claude Desktop
@@ -98,12 +132,32 @@ This integration follows a client-server architecture:
 
 The server translates between the MCP protocol and PromptQL's API, allowing seamless integration between AI assistants and your enterprise data.
 
+## Troubleshooting
+
+### Command not found: pip or python
+On many systems, especially macOS, you may need to use `python3` and `pip3` instead of `python` and `pip`.
+
+### externally-managed-environment error
+Modern Python installations often prevent global package installation. Use a virtual environment as described in the installation section.
+
+### No module named promptql_mcp_server
+Ensure you've:
+1. Installed the package with `pip install -e .`
+2. Are using the correct Python environment (if using a virtual environment, make sure it's activated)
+3. Configured Claude Desktop to use the correct Python executable path
+
+### Python version issues
+If you have multiple Python versions installed, make sure you're using Python 3.10 or higher:
+```bash
+python3.10 -m venv venv  # Specify the exact version
+```
+
 ## Development
 
 ### Project Structure
 
 ```
-promptql-mcp-server/
+promptql-mcp/
 ├── promptql_mcp_server/     # Main package
 │   ├── __init__.py
 │   ├── __main__.py          # Entry point
