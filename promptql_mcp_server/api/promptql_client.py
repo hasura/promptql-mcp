@@ -139,6 +139,53 @@ class PromptQLClient:
             logger.error(f"ERROR cancelling thread: {str(e)}")
             return {"error": f"Cancel error: {str(e)}"}
 
+    def get_artifact(self, thread_id: str, artifact_id: str) -> Dict:
+        """Get artifact data from a thread."""
+        logger.info(f"GETTING ARTIFACT: {artifact_id} from thread {thread_id}")
+
+        try:
+            response = requests.get(
+                f"{self.playground_url}/threads/v2/{thread_id}/artifacts/{artifact_id}/data",
+                headers={"Authorization": f"api-key {self.api_key}"},
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                logger.info(f"ARTIFACT RETRIEVED: {artifact_id}")
+
+                # Try to parse as JSON first
+                try:
+                    artifact_data = response.json()
+                    return {
+                        "thread_id": thread_id,
+                        "artifact_id": artifact_id,
+                        "content_type": response.headers.get("content-type", "application/json"),
+                        "data": artifact_data,
+                        "size": len(response.content)
+                    }
+                except json.JSONDecodeError:
+                    # If not JSON, return as text
+                    return {
+                        "thread_id": thread_id,
+                        "artifact_id": artifact_id,
+                        "content_type": response.headers.get("content-type", "text/plain"),
+                        "data": response.text,
+                        "size": len(response.content)
+                    }
+            elif response.status_code == 404:
+                logger.warning(f"Artifact {artifact_id} not found in thread {thread_id}")
+                return {
+                    "error": "Artifact not found",
+                    "details": f"Artifact {artifact_id} not found in thread {thread_id}"
+                }
+            else:
+                logger.error(f"ERROR getting artifact: HTTP {response.status_code}")
+                return {"error": f"Artifact error: {response.status_code}", "details": response.text}
+
+        except Exception as e:
+            logger.error(f"ERROR getting artifact: {str(e)}")
+            return {"error": f"Artifact error: {str(e)}"}
+
     def _start_thread(self, message: str, system_instructions: str = None) -> Dict:
         """Start a new thread with the given message. Returns thread_id and interaction_id."""
         headers = {
