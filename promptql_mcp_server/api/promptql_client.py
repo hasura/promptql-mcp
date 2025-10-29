@@ -26,28 +26,121 @@ class PromptQLClient:
         self.auth_token = auth_token
         self.timezone = timezone
         
-    def query(self, message: str, system_instructions: str = None) -> Dict:
-        """Send a query to the PromptQL Async Threads API."""
+
+    def start_thread(self, message: str, system_instructions: str = None) -> Dict:
+        """Start a new thread and poll for completion, returning complete response."""
         logger.info("="*80)
-        logger.info(f"SENDING QUERY TO PROMPTQL: '{message}'")
+        logger.info(f"STARTING NEW THREAD: '{message}'")
         logger.info("="*80)
 
-        # Debug API key - show first 8 chars and last 4 for verification
-        api_key_debug = f"{self.api_key[:8]}...{self.api_key[-4:]}" if self.api_key else "None"
-        logger.info(f"Using API Key: {api_key_debug}")
-        logger.info(f"Using Playground URL: {self.playground_url}")
-        logger.info(f"Using Auth Token: {self.auth_token[:8]}...{self.auth_token[-4:] if len(self.auth_token) > 8 else ''}")
+        start_result = self._start_thread(message, system_instructions)
+        if isinstance(start_result, dict) and "error" in start_result:
+            return start_result
 
-        # Step 1: Start a new thread
-        thread_id = self._start_thread(message, system_instructions)
-        if isinstance(thread_id, dict) and "error" in thread_id:
-            return thread_id
+        thread_id = start_result.get("thread_id")
+        interaction_id = start_result.get("interaction_id")
+        if not thread_id:
+            return {"error": "No thread_id received from start_thread"}
+
+        # Step 2: Poll for thread completion
+        completion_result = self._poll_thread_completion(thread_id)
+
+        # Add thread_id and interaction_id to the completion result
+        if isinstance(completion_result, dict) and "error" not in completion_result:
+            completion_result["thread_id"] = thread_id
+            completion_result["interaction_id"] = interaction_id
+
+        return completion_result
+
+    def start_thread_without_polling(self, message: str, system_instructions: str = None) -> Dict:
+        """Start a new thread without waiting for completion. Returns thread_id and interaction_id immediately."""
+        logger.info("="*80)
+        logger.info(f"STARTING NEW THREAD (NO POLLING): '{message}'")
+        logger.info("="*80)
+
+        return self._start_thread(message, system_instructions)
+
+    def continue_thread(self, thread_id: str, message: str, system_instructions: str = None) -> Dict:
+        """Continue an existing thread with a new message."""
+        logger.info("="*80)
+        logger.info(f"CONTINUING THREAD {thread_id}: '{message}'")
+        logger.info("="*80)
+
+        # Step 1: Add new interaction to thread
+        continue_result = self._continue_thread(thread_id, message, system_instructions)
+        if isinstance(continue_result, dict) and "error" in continue_result:
+            return continue_result
 
         # Step 2: Poll for thread completion
         return self._poll_thread_completion(thread_id)
 
-    def _start_thread(self, message: str, system_instructions: str = None) -> str:
-        """Start a new thread with the given message."""
+    def get_thread_status(self, thread_id: str) -> Dict:
+        """Get the current status of a thread without polling."""
+        logger.info(f"GETTING THREAD STATUS: {thread_id}")
+
+        try:
+            response = requests.get(
+                f"{self.playground_url}/threads/v2/{thread_id}",
+                headers={"Authorization": f"api-key {self.api_key}"},
+                timeout=30
+            )
+
+            if response.status_code != 200:
+                logger.error(f"ERROR getting thread status: HTTP {response.status_code}")
+                return {"error": f"Status error: {response.status_code}", "details": response.text}
+
+            # Parse the response
+            thread_data = self._parse_thread_response(response.text)
+
+            if thread_data:
+                is_complete = self._is_thread_complete(thread_data)
+                return {
+                    "thread_id": thread_id,
+                    "status": "complete" if is_complete else "processing",
+                    "thread_data": thread_data
+                }
+            else:
+                return {"error": "Failed to parse thread status"}
+
+        except Exception as e:
+            logger.error(f"ERROR getting thread status: {str(e)}")
+            return {"error": f"Status error: {str(e)}"}
+
+    def cancel_thread(self, thread_id: str) -> Dict:
+        """Cancel the processing of the latest interaction in a thread."""
+        logger.info(f"CANCELLING THREAD: {thread_id}")
+
+        try:
+            response = requests.post(
+                f"{self.playground_url}/threads/v2/{thread_id}/cancel",
+                headers={"Authorization": f"api-key {self.api_key}"},
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                logger.info(f"THREAD CANCELLED: {thread_id}")
+                return {
+                    "thread_id": thread_id,
+                    "status": "cancelled",
+                    "message": "Thread processing cancelled successfully"
+                }
+            elif response.status_code == 400:
+                # Thread is not currently processing
+                logger.warning(f"Cannot cancel thread {thread_id}: not currently processing")
+                return {
+                    "error": "Cannot cancel thread",
+                    "details": "Thread is not currently processing an interaction"
+                }
+            else:
+                logger.error(f"ERROR cancelling thread: HTTP {response.status_code}")
+                return {"error": f"Cancel error: {response.status_code}", "details": response.text}
+
+        except Exception as e:
+            logger.error(f"ERROR cancelling thread: {str(e)}")
+            return {"error": f"Cancel error: {str(e)}"}
+
+    def _start_thread(self, message: str, system_instructions: str = None) -> Dict:
+        """Start a new thread with the given message. Returns thread_id and interaction_id."""
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"api-key {self.api_key}"
@@ -92,12 +185,14 @@ class PromptQLClient:
         try:
             result = response.json()
             thread_id = result.get("thread_id")
+            interaction_id = result.get("interaction_id")
+
             if not thread_id:
                 logger.error("No thread_id in response")
                 return {"error": "No thread_id received from API"}
 
-            logger.info(f"THREAD STARTED: {thread_id}")
-            return thread_id
+            logger.info(f"THREAD STARTED: {thread_id}, INTERACTION: {interaction_id}")
+            return result  # Returns {"thread_id": "...", "interaction_id": "..."}
         except json.JSONDecodeError:
             logger.error("ERROR: Failed to parse JSON response")
             logger.error(f"Raw response: {response.text[:500]}...")
@@ -110,32 +205,21 @@ class PromptQLClient:
         start_time = time.time()
 
         while time.time() - start_time < max_wait_time:
-            try:
-                # Get thread state
-                response = requests.get(
-                    f"{self.playground_url}/threads/v2/{thread_id}",
-                    headers={"Authorization": f"api-key {self.api_key}"},
-                    timeout=30
-                )
+            # Use get_thread_status to check thread status
+            status_result = self.get_thread_status(thread_id)
 
-                if response.status_code != 200:
-                    logger.error(f"ERROR polling thread: HTTP {response.status_code}")
-                    logger.error(f"Response: {response.text}")
-                    return {"error": f"Polling error: {response.status_code}", "details": response.text}
+            # Handle errors from get_thread_status
+            if "error" in status_result:
+                logger.error(f"ERROR polling thread: {status_result.get('error')}")
+                return status_result
 
-                # Parse the response - it might be server-sent events format
-                thread_data = self._parse_thread_response(response.text)
+            # Check if thread is complete
+            if status_result.get("status") == "complete":
+                logger.info("THREAD COMPLETED")
+                return status_result.get("thread_data", {})
 
-                if thread_data and self._is_thread_complete(thread_data):
-                    logger.info("THREAD COMPLETED")
-                    return thread_data
-
-                logger.info(f"Thread still processing, waiting {poll_interval}s...")
-                time.sleep(poll_interval)
-
-            except Exception as e:
-                logger.error(f"ERROR polling thread: {str(e)}")
-                return {"error": f"Polling error: {str(e)}"}
+            logger.info(f"Thread still processing, waiting {poll_interval}s...")
+            time.sleep(poll_interval)
 
         logger.error(f"TIMEOUT: Thread did not complete within {max_wait_time} seconds")
         return {"error": f"Thread processing timeout after {max_wait_time} seconds"}
@@ -182,3 +266,61 @@ class PromptQLClient:
             )
 
         return False
+
+    def _continue_thread(self, thread_id: str, message: str, system_instructions: str = None) -> Dict:
+        """Add a new interaction to an existing thread. Returns thread_id and interaction_id."""
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"api-key {self.api_key}"
+        }
+
+        # Build request body for continue API
+        request_body = {
+            "user_message": message,
+            "ddn_headers": {
+                "Auth-Token": self.auth_token
+            },
+            "timezone": self.timezone
+        }
+
+        # Add system instructions if provided
+        if system_instructions:
+            request_body["system_instructions"] = system_instructions
+
+        # Print the request payload in a readable format
+        logger.info("CONTINUE REQUEST PAYLOAD:")
+        logger.info(json.dumps(request_body, indent=2))
+
+        # Send request to continue thread
+        logger.info(f"CONTINUING THREAD {thread_id}...")
+
+        try:
+            response = requests.post(
+                f"{self.playground_url}/threads/v2/{thread_id}/continue",
+                headers=headers,
+                json=request_body,
+                timeout=30
+            )
+        except Exception as e:
+            logger.error(f"CONNECTION ERROR: {str(e)}")
+            return {"error": f"Connection error: {str(e)}"}
+
+        if response.status_code != 200:
+            logger.error(f"ERROR: HTTP {response.status_code}")
+            logger.error(f"Response: {response.text}")
+            return {"error": f"API error: {response.status_code}", "details": response.text}
+
+        try:
+            result = response.json()
+            returned_thread_id = result.get("thread_id")
+            interaction_id = result.get("interaction_id")
+
+            if returned_thread_id != thread_id:
+                logger.warning(f"Thread ID mismatch: expected {thread_id}, got {returned_thread_id}")
+
+            logger.info(f"THREAD CONTINUED: {thread_id}, INTERACTION: {interaction_id}")
+            return result  # Returns {"thread_id": "...", "interaction_id": "..."}
+        except json.JSONDecodeError:
+            logger.error("ERROR: Failed to parse JSON response")
+            logger.error(f"Raw response: {response.text[:500]}...")
+            return {"error": "Failed to parse thread continue response"}
