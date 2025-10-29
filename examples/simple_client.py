@@ -35,11 +35,13 @@ async def main():
                 setup_config = input("\nDo you want to set up the server configuration? (y/n): ")
                 if setup_config.lower() == 'y':
                     api_key = input("Enter your PromptQL API key: ")
-                    ddn_url = input("Enter your DDN URL: ")
-                
+                    playground_url = input("Enter your PromptQL playground URL: ")
+                    auth_token = input("Enter your DDN Auth Token: ")
+
                     result = await client.call_tool("setup_config", {
                         "api_key": api_key,
-                        "ddn_url": ddn_url
+                        "playground_url": playground_url,
+                        "auth_token": auth_token
                     })
                     print(f"Configuration result: {result}")
             

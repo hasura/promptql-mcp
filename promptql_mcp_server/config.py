@@ -40,10 +40,16 @@ class ConfigManager:
         
         # If no file, try environment variables
         config = {}
-        for key in ["PROMPTQL_API_KEY", "PROMPTQL_DDN_URL"]:
-            if os.environ.get(key):
-                config[key.lower()] = os.environ.get(key)
-                logger.info(f"Using {key} from environment variables")
+        env_mappings = {
+            "PROMPTQL_API_KEY": "api_key",
+            "PROMPTQL_PLAYGROUND_URL": "playground_url",
+            "PROMPTQL_AUTH_TOKEN": "auth_token"
+        }
+
+        for env_key, config_key in env_mappings.items():
+            if os.environ.get(env_key):
+                config[config_key] = os.environ.get(env_key)
+                logger.info(f"Using {env_key} from environment variables")
         
         # If we got config from env vars, save it to file for persistence
         if config:
@@ -91,4 +97,6 @@ class ConfigManager:
     
     def is_configured(self) -> bool:
         """Check if the essential configuration is present."""
-        return bool(self.get("api_key")) and bool(self.get("ddn_url"))
+        return (bool(self.get("api_key")) and
+                bool(self.get("playground_url")) and
+                bool(self.get("auth_token")))

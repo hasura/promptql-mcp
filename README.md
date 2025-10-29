@@ -19,7 +19,7 @@ This project provides a bridge between Hasura's PromptQL data agent and AI assis
 ### Prerequisites
 
 - Python 3.10 or higher
-- A Hasura PromptQL project with API key and DDN URL
+- A Hasura PromptQL project with API key, playground URL, and DDN Auth Token
 - Claude Desktop (for interactive use) or any MCP-compatible client
 
 ### Install from Source
@@ -49,7 +49,7 @@ pip install -e .
 1. Configure your PromptQL credentials:
 
 ```bash
-python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --ddn-url YOUR_DDN_URL
+python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --playground-url YOUR_PLAYGROUND_URL --auth-token YOUR_AUTH_TOKEN
 ```
 
 2. Test the server:
@@ -116,7 +116,7 @@ where python  # On Windows
 ### Tools
 The server exposes the following MCP tools:
 - **ask_question** - Ask natural language questions about your data
-- **setup_config** - Configure PromptQL API key and DDN URL
+- **setup_config** - Configure PromptQL API key, playground URL, and DDN Auth Token
 - **check_config** - Verify the current configuration status
 
 ### Prompts
