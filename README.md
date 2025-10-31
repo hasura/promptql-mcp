@@ -11,8 +11,27 @@ This project provides a bridge between Hasura's PromptQL data agent and AI assis
 - 🔍 **Natural Language Data Queries** - Ask questions about your enterprise data in plain English
 - 📊 **Table Artifact Support** - Get formatted table results from your data queries
 - 🔐 **Secure Configuration** - Safely store and manage your PromptQL API credentials
+- 🔑 **Dual Authentication Modes** - Support for both public and private DDN deployments
 - 📈 **Data Analysis** - Get insights and visualizations from your data
 - 🛠️ **Simple Integration** - Works with Claude Desktop and other MCP-compatible clients
+
+## Authentication Modes
+
+The PromptQL MCP server supports two authentication modes to work with different DDN deployment types:
+
+### Public Mode (Default)
+- Uses `Auth-Token` header for authentication
+- Compatible with public DDN endpoints
+- Backward compatible with existing configurations
+- **Use when**: Your DDN deployment is publicly accessible
+
+### Private Mode
+- Uses `x-hasura-ddn-token` header for authentication
+- Compatible with private DDN endpoints
+- Enhanced security for private deployments
+- **Use when**: Your DDN deployment is private/internal
+
+You can specify the authentication mode during configuration using the `--auth-mode` flag or `auth_mode` parameter.
 
 ## Installation
 
@@ -49,7 +68,19 @@ pip install -e .
 1. Configure your PromptQL credentials:
 
 ```bash
-python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --playground-url YOUR_PLAYGROUND_URL --auth-token YOUR_AUTH_TOKEN
+# For public DDN deployments (default)
+python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --playground-url YOUR_PLAYGROUND_URL --auth-token YOUR_AUTH_TOKEN --auth-mode public
+
+# For private DDN deployments
+python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --playground-url YOUR_PLAYGROUND_URL --auth-token YOUR_AUTH_TOKEN --auth-mode private
+```
+
+**Alternative: Environment Variables**
+```bash
+export PROMPTQL_API_KEY="your-api-key"
+export PROMPTQL_PLAYGROUND_URL="your-playground-url"
+export PROMPTQL_AUTH_TOKEN="your-auth-token"
+export PROMPTQL_AUTH_MODE="public"  # or "private"
 ```
 
 2. Test the server:
@@ -81,7 +112,7 @@ python examples/simple_client.py
 }
 ```
 
-Replace `/full/path/to/python` with the actual path to your Python executable. 
+Replace `/full/path/to/python` with the actual path to your Python executable.
 
 If you're using a virtual environment (recommended):
 ```json
@@ -90,6 +121,24 @@ If you're using a virtual environment (recommended):
     "promptql": {
       "command": "/path/to/your/project/venv/bin/python",
       "args": ["-m", "promptql_mcp_server"]
+    }
+  }
+}
+```
+
+**Alternative: Using Environment Variables in Claude Desktop**
+```json
+{
+  "mcpServers": {
+    "promptql": {
+      "command": "/full/path/to/python",
+      "args": ["-m", "promptql_mcp_server"],
+      "env": {
+        "PROMPTQL_API_KEY": "your-api-key",
+        "PROMPTQL_PLAYGROUND_URL": "your-playground-url",
+        "PROMPTQL_AUTH_TOKEN": "your-auth-token",
+        "PROMPTQL_AUTH_MODE": "public"
+      }
     }
   }
 }
@@ -124,8 +173,8 @@ The server exposes the following MCP tools:
 - **cancel_thread** - Cancel the processing of the latest interaction in a thread
 
 ### Configuration
-- **setup_config** - Configure PromptQL API key, playground URL, and DDN Auth Token
-- **check_config** - Verify the current configuration status
+- **setup_config** - Configure PromptQL API key, playground URL, DDN Auth Token, and authentication mode (public/private)
+- **check_config** - Verify the current configuration status including authentication mode
 
 ## Usage Examples
 
@@ -195,6 +244,39 @@ result = await client.call_tool("start_thread", {
 })
 ```
 
+## Configuration Examples
+
+### Setting Up Authentication Modes
+
+#### Public Mode Configuration (Default)
+```python
+# Using MCP tool
+result = await client.call_tool("setup_config", {
+    "api_key": "your-api-key",
+    "playground_url": "https://promptql.your-domain.public-ddn.hasura.app/playground",
+    "auth_token": "your-auth-token",
+    "auth_mode": "public"
+})
+```
+
+#### Private Mode Configuration
+```python
+# Using MCP tool
+result = await client.call_tool("setup_config", {
+    "api_key": "your-api-key",
+    "playground_url": "https://promptql.your-domain.private-ddn.hasura.app/playground",
+    "auth_token": "your-auth-token",
+    "auth_mode": "private"
+})
+```
+
+#### Checking Current Configuration
+```python
+# Check what authentication mode is currently configured
+config_result = await client.call_tool("check_config", {})
+# Returns configuration details including auth_mode
+```
+
 ### Prompts
 - **data_analysis** - Create a specialized prompt for data analysis on a specific topic
 
@@ -226,6 +308,30 @@ Ensure you've:
 If you have multiple Python versions installed, make sure you're using Python 3.10 or higher:
 ```bash
 python3.10 -m venv venv  # Specify the exact version
+```
+
+### Authentication Issues
+
+#### Wrong authentication mode
+If you're getting authentication errors, verify you're using the correct authentication mode:
+
+- **Public DDN deployments**: Use `--auth-mode public` (default)
+- **Private DDN deployments**: Use `--auth-mode private`
+
+Check your current configuration:
+```bash
+python -m promptql_mcp_server
+# Then use check_config tool to see current auth_mode
+```
+
+#### Switching authentication modes
+To switch between authentication modes, simply reconfigure:
+```bash
+# Switch to private mode
+python -m promptql_mcp_server setup --api-key YOUR_API_KEY --playground-url YOUR_URL --auth-token YOUR_TOKEN --auth-mode private
+
+# Switch back to public mode
+python -m promptql_mcp_server setup --api-key YOUR_API_KEY --playground-url YOUR_URL --auth-token YOUR_TOKEN --auth-mode public
 ```
 
 ## Development
