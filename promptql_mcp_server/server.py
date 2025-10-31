@@ -21,18 +21,19 @@ def _get_promptql_client() -> PromptQLClient:
     api_key = config.get("api_key")
     playground_url = config.get("playground_url")
     auth_token = config.get("auth_token")
+    auth_mode = config.get_auth_mode()  # Defaults to "public" if not set
 
-    logger.info(f"Loading config - API Key exists: {bool(api_key)}, Playground URL exists: {bool(playground_url)}, Auth Token exists: {bool(auth_token)}")
+    logger.info(f"Loading config - API Key exists: {bool(api_key)}, Playground URL exists: {bool(playground_url)}, Auth Token exists: {bool(auth_token)}, Auth Mode: {auth_mode}")
 
     if not api_key or not playground_url or not auth_token:
         raise ValueError("PromptQL API key, playground URL, and auth token must be configured. Use the setup_config tool.")
 
-    return PromptQLClient(api_key=api_key, playground_url=playground_url, auth_token=auth_token)
+    return PromptQLClient(api_key=api_key, playground_url=playground_url, auth_token=auth_token, auth_mode=auth_mode)
 
 
 
 @mcp.tool(name="setup_config")
-def setup_config(api_key: str, playground_url: str, auth_token: str) -> dict:
+def setup_config(api_key: str, playground_url: str, auth_token: str, auth_mode: str = "public") -> dict:
     """
     Configure the PromptQL MCP server with API key, playground URL, and auth token.
 
@@ -40,6 +41,7 @@ def setup_config(api_key: str, playground_url: str, auth_token: str) -> dict:
         api_key: PromptQL API key
         playground_url: PromptQL playground URL (e.g., https://promptql.<dataplane-name>.private-ddn.hasura.app/playground)
         auth_token: DDN Auth Token for accessing your data
+        auth_mode: Authentication mode - "public" for Auth-Token or "private" for x-hasura-ddn-token (default: "public")
 
     Returns:
         Configuration result with success status and details
@@ -52,11 +54,21 @@ def setup_config(api_key: str, playground_url: str, auth_token: str) -> dict:
     logger.info(f"API Key: '{masked_key}' (redacted middle)")
     logger.info(f"Playground URL: '{playground_url}'")
     logger.info(f"Auth Token: '{masked_token}' (redacted middle)")
+    logger.info(f"Auth Mode: '{auth_mode}'")
     logger.info("="*80)
+
+    # Validate auth_mode
+    if auth_mode.lower() not in ["public", "private"]:
+        return {
+            "success": False,
+            "error": f"Invalid auth_mode '{auth_mode}'. Must be 'public' or 'private'.",
+            "configured_items": {}
+        }
 
     config.set("api_key", api_key)
     config.set("playground_url", playground_url)
     config.set("auth_token", auth_token)
+    config.set("auth_mode", auth_mode.lower())
 
     logger.info("CONFIGURATION SAVED SUCCESSFULLY")
     return {
@@ -65,7 +77,8 @@ def setup_config(api_key: str, playground_url: str, auth_token: str) -> dict:
         "configured_items": {
             "api_key": masked_key,
             "playground_url": playground_url,
-            "auth_token": masked_token
+            "auth_token": masked_token,
+            "auth_mode": auth_mode.lower()
         }
     }
 
@@ -85,6 +98,7 @@ def check_config() -> dict:
     api_key = config.get("api_key")
     playground_url = config.get("playground_url")
     auth_token = config.get("auth_token")
+    auth_mode = config.get_auth_mode()
 
     if api_key and playground_url and auth_token:
         masked_key = api_key[:5] + "..." + api_key[-5:] if api_key else "None"
@@ -96,7 +110,8 @@ def check_config() -> dict:
             "configuration": {
                 "api_key": masked_key,
                 "playground_url": playground_url,
-                "auth_token": masked_token
+                "auth_token": masked_token,
+                "auth_mode": auth_mode
             },
             "missing_items": []
         }
@@ -453,6 +468,7 @@ async def continue_thread(thread_id: str, message: str, system_instructions: Opt
 async def get_thread_status(thread_id: str) -> dict:
     """
     Get the current status of a PromptQL thread with detailed information.
+    Uses SSE (Server-Sent Events) streaming to get real-time thread state.
 
     Args:
         thread_id: The ID of the thread to check
@@ -460,6 +476,7 @@ async def get_thread_status(thread_id: str) -> dict:
     Returns:
         Comprehensive thread status as structured data including:
         - Thread status (processing/complete)
+        - Thread metadata (title, version)
         - Total interactions count
         - Detailed breakdown of each interaction:
           * User messages with timestamps
@@ -485,13 +502,23 @@ async def get_thread_status(thread_id: str) -> dict:
                 "success": False,
                 "error": result['error'],
                 "details": result.get('details', ''),
-                "thread_id": thread_id
+                "thread_id": thread_id,
+                "status": "error",
+                "title": "",
+                "version": "",
+                "interactions_count": 0,
+                "message": f"Error getting thread {thread_id} status",
+                "interactions": []
             }
 
         status = result.get("status", "unknown")
         thread_data = result.get("thread_data", {})
         interactions = thread_data.get("interactions", [])
         interactions_count = len(interactions)
+
+        # Extract additional metadata from SSE-enhanced thread data
+        thread_title = thread_data.get("title", "")
+        thread_version = thread_data.get("version", "")
 
         # Build structured response
         response_data = {
@@ -500,6 +527,8 @@ async def get_thread_status(thread_id: str) -> dict:
             "status": status,
             "interactions_count": interactions_count,
             "message": f"Thread {thread_id} is {status}",
+            "title": thread_title,
+            "version": thread_version,
             "interactions": []
         }
 
@@ -587,7 +616,13 @@ async def get_thread_status(thread_id: str) -> dict:
         return {
             "success": False,
             "error": f"Unexpected error: {str(e)}",
-            "thread_id": thread_id
+            "thread_id": thread_id,
+            "status": "error",
+            "title": "",
+            "version": "",
+            "interactions_count": 0,
+            "message": f"Unexpected error getting thread {thread_id} status",
+            "interactions": []
         }
 
 @mcp.tool(name="cancel_thread")

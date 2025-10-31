@@ -29,6 +29,8 @@ def main():
     setup_parser.add_argument("--api-key", required=True, help="PromptQL API key")
     setup_parser.add_argument("--playground-url", required=True, help="PromptQL playground URL")
     setup_parser.add_argument("--auth-token", required=True, help="DDN Auth Token")
+    setup_parser.add_argument("--auth-mode", default="public", choices=["public", "private"],
+                             help="Authentication mode: 'public' for Auth-Token or 'private' for x-hasura-ddn-token (default: public)")
 
     # Run command (default)
     run_parser = subparsers.add_parser("run", help="Run the server")
@@ -39,7 +41,8 @@ def main():
         config.set("api_key", args.api_key)
         config.set("playground_url", args.playground_url)
         config.set("auth_token", args.auth_token)
-        logger.info("Configuration saved successfully.")
+        config.set("auth_mode", args.auth_mode)
+        logger.info(f"Configuration saved successfully with auth_mode: {args.auth_mode}")
         return 0
     
     # Default to running the server
@@ -50,13 +53,14 @@ def main():
     api_key = config.get("api_key")
     playground_url = config.get("playground_url")
     auth_token = config.get("auth_token")
+    auth_mode = config.get_auth_mode()
 
     if not api_key or not playground_url or not auth_token:
         logger.warning("WARNING: PromptQL configuration incomplete.")
         logger.warning("You can configure by running:")
-        logger.warning("  python -m promptql_mcp_server setup --api-key YOUR_API_KEY --playground-url YOUR_PLAYGROUND_URL --auth-token YOUR_AUTH_TOKEN")
+        logger.warning("  python -m promptql_mcp_server setup --api-key YOUR_API_KEY --playground-url YOUR_PLAYGROUND_URL --auth-token YOUR_AUTH_TOKEN --auth-mode public")
         logger.warning("Or by setting environment variables:")
-        logger.warning("  PROMPTQL_API_KEY, PROMPTQL_PLAYGROUND_URL, and PROMPTQL_AUTH_TOKEN")
+        logger.warning("  PROMPTQL_API_KEY, PROMPTQL_PLAYGROUND_URL, PROMPTQL_AUTH_TOKEN, and PROMPTQL_AUTH_MODE")
         logger.warning("Continuing with unconfigured server...")
     else:
         # Show partial credentials for debugging
@@ -65,6 +69,7 @@ def main():
         logger.info(f"Using API Key: {masked_key}")
         logger.info(f"Using Playground URL: {playground_url}")
         logger.info(f"Using Auth Token: {masked_token}")
+        logger.info(f"Using Auth Mode: {auth_mode}")
     
     # Run the MCP server
     logger.info("STARTING MCP SERVER - READY FOR CONNECTIONS")

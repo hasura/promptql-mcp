@@ -19,13 +19,41 @@ logger = logging.getLogger("promptql_client")
 class PromptQLClient:
     """Client for interacting with the PromptQL Async Threads API."""
 
-    def __init__(self, api_key: str, playground_url: str, auth_token: str, timezone: str = "America/Los_Angeles"):
-        """Initialize the PromptQL API client."""
+    def __init__(self, api_key: str, playground_url: str, auth_token: str, auth_mode: str = "public", timezone: str = "America/Los_Angeles"):
+        """Initialize the PromptQL API client.
+
+        Args:
+            api_key: PromptQL API key
+            playground_url: PromptQL playground URL
+            auth_token: DDN Auth Token
+            auth_mode: Authentication mode - "public" for Auth-Token or "private" for x-hasura-ddn-token
+            timezone: Timezone for requests
+        """
         self.api_key = api_key
         self.playground_url = playground_url.rstrip('/')  # Remove trailing slash if present
         self.auth_token = auth_token
+        self.auth_mode = auth_mode.lower()
         self.timezone = timezone
-        
+
+        # Validate auth_mode
+        if self.auth_mode not in ["public", "private"]:
+            raise ValueError(f"Invalid auth_mode '{auth_mode}'. Must be 'public' or 'private'.")
+
+        logger.info(f"PromptQL Client initialized with auth_mode: {self.auth_mode}")
+
+    def _get_ddn_headers(self) -> Dict[str, str]:
+        """Get DDN headers based on the authentication mode.
+
+        Returns:
+            Dictionary with appropriate authentication header
+        """
+        if self.auth_mode == "public":
+            return {"Auth-Token": self.auth_token}
+        elif self.auth_mode == "private":
+            return {"x-hasura-ddn-token": self.auth_token}
+        else:
+            raise ValueError(f"Invalid auth_mode: {self.auth_mode}")
+
 
     def start_thread(self, message: str, system_instructions: str = None) -> Dict:
         """Start a new thread and poll for completion, returning complete response."""
@@ -75,13 +103,19 @@ class PromptQLClient:
         return self._poll_thread_completion(thread_id)
 
     def get_thread_status(self, thread_id: str) -> Dict:
-        """Get the current status of a thread without polling."""
+        """Get the current status of a thread without polling. Handles SSE (Server-Sent Events) response."""
         logger.info(f"GETTING THREAD STATUS: {thread_id}")
 
         try:
+            # Use streaming request with proper SSE headers
             response = requests.get(
                 f"{self.playground_url}/threads/v2/{thread_id}",
-                headers={"Authorization": f"api-key {self.api_key}"},
+                headers={
+                    "Authorization": f"api-key {self.api_key}",
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache"
+                },
+                stream=True,
                 timeout=30
             )
 
@@ -89,8 +123,8 @@ class PromptQLClient:
                 logger.error(f"ERROR getting thread status: HTTP {response.status_code}")
                 return {"error": f"Status error: {response.status_code}", "details": response.text}
 
-            # Parse the response
-            thread_data = self._parse_thread_response(response.text)
+            # Parse SSE stream
+            thread_data = self._parse_sse_stream(response)
 
             if thread_data:
                 is_complete = self._is_thread_complete(thread_data)
@@ -100,8 +134,14 @@ class PromptQLClient:
                     "thread_data": thread_data
                 }
             else:
-                return {"error": "Failed to parse thread status"}
+                return {"error": "Failed to parse thread status from SSE stream"}
 
+        except requests.exceptions.Timeout:
+            logger.error(f"TIMEOUT getting thread status for {thread_id}")
+            return {"error": "Request timeout while getting thread status"}
+        except requests.exceptions.ConnectionError:
+            logger.error(f"CONNECTION ERROR getting thread status for {thread_id}")
+            return {"error": "Connection error while getting thread status"}
         except Exception as e:
             logger.error(f"ERROR getting thread status: {str(e)}")
             return {"error": f"Status error: {str(e)}"}
@@ -196,9 +236,7 @@ class PromptQLClient:
         # Build request body for new async API
         request_body = {
             "user_message": message,
-            "ddn_headers": {
-                "Auth-Token": self.auth_token
-            },
+            "ddn_headers": self._get_ddn_headers(),
             "timezone": self.timezone
         }
 
@@ -271,6 +309,83 @@ class PromptQLClient:
         logger.error(f"TIMEOUT: Thread did not complete within {max_wait_time} seconds")
         return {"error": f"Thread processing timeout after {max_wait_time} seconds"}
 
+    def _parse_sse_stream(self, response) -> Dict:
+        """Parse Server-Sent Events stream and extract thread state."""
+        logger.info("Parsing SSE stream for thread status")
+
+        thread_state = None
+        current_event_type = None
+
+        try:
+            # Process the SSE stream line by line
+            for line in response.iter_lines(decode_unicode=True):
+                if line is None:
+                    continue
+
+                # Handle SSE event type
+                if line.startswith('event: '):
+                    current_event_type = line[7:]  # Remove 'event: ' prefix
+                    logger.debug(f"SSE Event Type: {current_event_type}")
+
+                # Handle SSE data
+                elif line.startswith('data: '):
+                    data_content = line[6:]  # Remove 'data: ' prefix
+
+                    try:
+                        event_data = json.loads(data_content)
+
+                        # Handle current-thread-state event (main thread data)
+                        if current_event_type == "current-thread-state":
+                            logger.info("Received current-thread-state event")
+
+                            # Extract thread_state from the nested structure
+                            if "thread_state" in event_data:
+                                new_state = event_data["thread_state"]
+                                if new_state:
+                                    # Also include top-level metadata
+                                    enhanced_state = new_state.copy()
+                                    enhanced_state["thread_id"] = event_data.get("thread_id")
+                                    enhanced_state["title"] = event_data.get("title")
+                                    enhanced_state["version"] = event_data.get("version")
+
+                                    # Use the most recent current-thread-state
+                                    thread_state = enhanced_state
+                                    logger.debug(f"Updated thread state with {len(new_state.get('interactions', []))} interactions")
+
+                        # Handle interaction-update events (real-time updates)
+                        elif current_event_type == "interaction-update":
+                            logger.debug(f"Received interaction-update event: {event_data.get('event', {}).get('type', 'unknown')}")
+                            # For now, we'll rely on current-thread-state for the main data
+                            # interaction-update events could be used for real-time progress tracking
+
+                        else:
+                            logger.debug(f"Received other event type: {current_event_type}")
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse SSE data as JSON: {data_content[:100]}...")
+                        continue
+
+                elif line == '':
+                    # Empty line indicates end of event, reset event type
+                    current_event_type = None
+                    continue
+
+                else:
+                    # Handle other SSE fields (id:, retry:, etc.)
+                    logger.debug(f"SSE Field: {line}")
+
+        except Exception as e:
+            logger.error(f"Error parsing SSE stream: {str(e)}")
+            return {}
+        finally:
+            # Ensure the response is properly closed
+            try:
+                response.close()
+            except:
+                pass
+
+        return thread_state or {}
+
     def _parse_thread_response(self, response_text: str) -> Dict:
         """Parse the thread response, handling both JSON and server-sent events format."""
         try:
@@ -324,9 +439,7 @@ class PromptQLClient:
         # Build request body for continue API
         request_body = {
             "user_message": message,
-            "ddn_headers": {
-                "Auth-Token": self.auth_token
-            },
+            "ddn_headers": self._get_ddn_headers(),
             "timezone": self.timezone
         }
 

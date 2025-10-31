@@ -43,7 +43,8 @@ class ConfigManager:
         env_mappings = {
             "PROMPTQL_API_KEY": "api_key",
             "PROMPTQL_PLAYGROUND_URL": "playground_url",
-            "PROMPTQL_AUTH_TOKEN": "auth_token"
+            "PROMPTQL_AUTH_TOKEN": "auth_token",
+            "PROMPTQL_AUTH_MODE": "auth_mode"
         }
 
         for env_key, config_key in env_mappings.items():
@@ -100,3 +101,7 @@ class ConfigManager:
         return (bool(self.get("api_key")) and
                 bool(self.get("playground_url")) and
                 bool(self.get("auth_token")))
+
+    def get_auth_mode(self) -> str:
+        """Get the authentication mode, defaulting to 'public' if not set."""
+        return self.get("auth_mode", "public")
