@@ -106,7 +106,7 @@ python examples/simple_client.py
         "PROMPTQL_API_KEY=your_api_key_here",
         "-e",
         "PROMPTQL_DDN_URL=your_ddn_url_here",
-        "promptql-mcp:latest"
+        "hasura/promptql-mcp:latest"
       ]
     }
   }
