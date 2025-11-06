@@ -18,19 +18,35 @@ This project provides a bridge between Hasura's PromptQL data agent and AI assis
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.10 or higher (for local installation) OR Docker (for containerized installation)
 - A Hasura PromptQL project with API key and DDN URL
 - Claude Desktop (for interactive use) or any MCP-compatible client
 
-### Install from Source
+### Option 1: Using Docker (Recommended)
+
+The easiest way to run the PromptQL MCP server is using Docker:
+
+```bash
+# Build the Docker image
+docker build -t promptql-mcp:latest .
+
+# Or use the pre-built image from Docker Hub (coming soon)
+docker pull yourusername/promptql-mcp:latest
+```
+
+See the [Docker Setup Guide](docker/README.md) for detailed instructions.
+
+### Option 2: Install from Source
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/hasura/promptql-mcp.git
 cd promptql-mcp
 ```
 
 2. Set up a virtual environment (recommended):
+
 ```bash
 # Create a virtual environment
 python -m venv venv
@@ -40,6 +56,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
 3. Install the package:
+
 ```bash
 pip install -e .
 ```
@@ -64,11 +81,39 @@ python -m promptql_mcp_server
 python examples/simple_client.py
 ```
 
-## Using with Claude Desktop
+## Using with Claude Desktop or Cursor
 
-1. Install [Claude Desktop](https://claude.ai/download)
-2. Open Claude Desktop and go to Settings > Developer
-3. Click "Edit Config" and add the following:
+1. Install [Claude Desktop](https://claude.ai/download) or have Cursor installed
+2. Open the MCP configuration file:
+
+   - **Claude Desktop**: Settings > Developer > Edit Config
+   - **Cursor**: `~/.cursor/mcp.json`
+
+3. Add the configuration:
+
+### Using Docker (Recommended)
+
+```json
+{
+  "mcpServers": {
+    "promptql": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PROMPTQL_API_KEY=your_api_key_here",
+        "-e",
+        "PROMPTQL_DDN_URL=your_ddn_url_here",
+        "promptql-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+### Using Local Python Installation
 
 ```json
 {
@@ -81,9 +126,10 @@ python examples/simple_client.py
 }
 ```
 
-Replace `/full/path/to/python` with the actual path to your Python executable. 
+Replace `/full/path/to/python` with the actual path to your Python executable.
 
-If you're using a virtual environment (recommended):
+If you're using a virtual environment:
+
 ```json
 {
   "mcpServers": {
@@ -96,13 +142,14 @@ If you're using a virtual environment (recommended):
 ```
 
 To find your Python path, run:
+
 ```bash
 which python  # On macOS/Linux
 where python  # On Windows
 ```
 
-4. Restart Claude Desktop
-5. Chat with Claude and use natural language to query your data
+4. Restart Claude Desktop or Cursor
+5. Chat with Claude/Cursor and use natural language to query your data
 
 ### Example Prompts for Claude
 
@@ -114,12 +161,15 @@ where python  # On Windows
 ## Available Tools and Prompts
 
 ### Tools
+
 The server exposes the following MCP tools:
+
 - **ask_question** - Ask natural language questions about your data
 - **setup_config** - Configure PromptQL API key and DDN URL
 - **check_config** - Verify the current configuration status
 
 ### Prompts
+
 - **data_analysis** - Create a specialized prompt for data analysis on a specific topic
 
 ## Architecture
@@ -135,19 +185,25 @@ The server translates between the MCP protocol and PromptQL's API, allowing seam
 ## Troubleshooting
 
 ### Command not found: pip or python
+
 On many systems, especially macOS, you may need to use `python3` and `pip3` instead of `python` and `pip`.
 
 ### externally-managed-environment error
+
 Modern Python installations often prevent global package installation. Use a virtual environment as described in the installation section.
 
 ### No module named promptql_mcp_server
+
 Ensure you've:
+
 1. Installed the package with `pip install -e .`
 2. Are using the correct Python environment (if using a virtual environment, make sure it's activated)
 3. Configured Claude Desktop to use the correct Python executable path
 
 ### Python version issues
+
 If you have multiple Python versions installed, make sure you're using Python 3.10 or higher:
+
 ```bash
 python3.10 -m venv venv  # Specify the exact version
 ```
