@@ -11,15 +11,34 @@ This project provides a bridge between Hasura's PromptQL data agent and AI assis
 - 🔍 **Natural Language Data Queries** - Ask questions about your enterprise data in plain English
 - 📊 **Table Artifact Support** - Get formatted table results from your data queries
 - 🔐 **Secure Configuration** - Safely store and manage your PromptQL API credentials
+- 🔑 **Dual Authentication Modes** - Support for both public and private DDN deployments
 - 📈 **Data Analysis** - Get insights and visualizations from your data
 - 🛠️ **Simple Integration** - Works with Claude Desktop and other MCP-compatible clients
+
+## Authentication Modes
+
+The PromptQL MCP server supports two authentication modes to work with different DDN deployment types:
+
+### Public Mode (Default)
+- Uses `Auth-Token` header for authentication
+- Compatible with public DDN endpoints
+- Backward compatible with existing configurations
+- **Use when**: Your DDN deployment is publicly accessible
+
+### Private Mode
+- Uses `x-hasura-ddn-token` header for authentication
+- Compatible with private DDN endpoints
+- Enhanced security for private deployments
+- **Use when**: Your DDN deployment is private/internal
+
+You can specify the authentication mode during configuration using the `--auth-mode` flag or `auth_mode` parameter.
 
 ## Installation
 
 ### Prerequisites
 
 - Python 3.10 or higher
-- A Hasura PromptQL project with API key and DDN URL
+- A Hasura PromptQL project with API key, playground URL, and DDN Auth Token
 - Claude Desktop (for interactive use) or any MCP-compatible client
 
 ### Install from Source
@@ -49,7 +68,19 @@ pip install -e .
 1. Configure your PromptQL credentials:
 
 ```bash
-python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --ddn-url YOUR_DDN_URL
+# For public DDN deployments (default)
+python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --playground-url YOUR_PLAYGROUND_URL --auth-token YOUR_AUTH_TOKEN --auth-mode public
+
+# For private DDN deployments
+python -m promptql_mcp_server setup --api-key YOUR_PROMPTQL_API_KEY --playground-url YOUR_PLAYGROUND_URL --auth-token YOUR_AUTH_TOKEN --auth-mode private
+```
+
+**Alternative: Environment Variables**
+```bash
+export PROMPTQL_API_KEY="your-api-key"
+export PROMPTQL_PLAYGROUND_URL="your-playground-url"
+export PROMPTQL_AUTH_TOKEN="your-auth-token"
+export PROMPTQL_AUTH_MODE="public"  # or "private"
 ```
 
 2. Test the server:
@@ -81,7 +112,7 @@ python examples/simple_client.py
 }
 ```
 
-Replace `/full/path/to/python` with the actual path to your Python executable. 
+Replace `/full/path/to/python` with the actual path to your Python executable.
 
 If you're using a virtual environment (recommended):
 ```json
@@ -90,6 +121,24 @@ If you're using a virtual environment (recommended):
     "promptql": {
       "command": "/path/to/your/project/venv/bin/python",
       "args": ["-m", "promptql_mcp_server"]
+    }
+  }
+}
+```
+
+**Alternative: Using Environment Variables in Claude Desktop**
+```json
+{
+  "mcpServers": {
+    "promptql": {
+      "command": "/full/path/to/python",
+      "args": ["-m", "promptql_mcp_server"],
+      "env": {
+        "PROMPTQL_API_KEY": "your-api-key",
+        "PROMPTQL_PLAYGROUND_URL": "your-playground-url",
+        "PROMPTQL_AUTH_TOKEN": "your-auth-token",
+        "PROMPTQL_AUTH_MODE": "public"
+      }
     }
   }
 }
@@ -115,9 +164,118 @@ where python  # On Windows
 
 ### Tools
 The server exposes the following MCP tools:
-- **ask_question** - Ask natural language questions about your data
-- **setup_config** - Configure PromptQL API key and DDN URL
-- **check_config** - Verify the current configuration status
+
+### Thread Management Mode
+- **start_thread** - Start a new conversation thread with an initial message and wait for completion (returns thread_id, interaction_id, and response)
+- **start_thread_without_polling** - Start a new conversation thread without waiting for completion (returns thread_id and interaction_id immediately)
+- **continue_thread** - Continue an existing thread with a new message (maintains conversation context)
+- **get_thread_status** - Check the status of a thread (processing/complete) using GET /threads/v2/{thread_id}
+- **cancel_thread** - Cancel the processing of the latest interaction in a thread
+
+### Configuration
+- **setup_config** - Configure PromptQL API key, playground URL, DDN Auth Token, and authentication mode (public/private)
+- **check_config** - Verify the current configuration status including authentication mode
+
+## Usage Examples
+
+### Multi-Turn Conversation Mode
+
+#### Option 1: Start with polling (get immediate response)
+```python
+# Start a new conversation thread (waits for completion and returns full response)
+thread_result = await client.call_tool("start_thread", {
+    "message": "What tables are available in my database?"
+})
+
+# Extract thread_id from result (format: "Thread ID: abc-123\nInteraction ID: def-456\n\n[response content]")
+thread_id = thread_result.split("Thread ID: ")[1].split("\n")[0].strip()
+
+# Continue the conversation with context
+result = await client.call_tool("continue_thread", {
+    "thread_id": thread_id,
+    "message": "Show me the schema of the users table"
+})
+```
+
+#### Option 2: Start without polling (check status separately)
+```python
+# Start a new conversation thread (returns immediately with thread_id)
+thread_result = await client.call_tool("start_thread_without_polling", {
+    "message": "What tables are available in my database?"
+})
+
+# Extract thread_id from result (format: "Thread ID: abc-123\nInteraction ID: def-456\n\n...")
+thread_id = thread_result.split("Thread ID: ")[1].split("\n")[0].strip()
+
+# Check status manually
+status_result = await client.call_tool("get_thread_status", {
+    "thread_id": thread_id
+})
+
+# Continue when ready
+result = await client.call_tool("continue_thread", {
+    "thread_id": thread_id,
+    "message": "Show me the schema of the users table"
+})
+
+# Continue further
+result = await client.call_tool("continue_thread", {
+    "thread_id": thread_id,
+    "message": "How many records are in that table?"
+})
+
+# Check thread status
+status = await client.call_tool("get_thread_status", {
+    "thread_id": thread_id
+})
+
+# Cancel thread processing (if currently processing)
+cancel_result = await client.call_tool("cancel_thread", {
+    "thread_id": thread_id
+})
+```
+
+### With System Instructions
+```python
+# Start thread with system instructions
+result = await client.call_tool("start_thread", {
+    "message": "Show me the top 10 products by revenue",
+    "system_instructions": "Format all results as markdown tables"
+})
+```
+
+## Configuration Examples
+
+### Setting Up Authentication Modes
+
+#### Public Mode Configuration (Default)
+```python
+# Using MCP tool
+result = await client.call_tool("setup_config", {
+    "api_key": "your-api-key",
+    "playground_url": "https://promptql.your-domain.public-ddn.hasura.app/playground",
+    "auth_token": "your-auth-token",
+    "auth_mode": "public"
+})
+```
+
+#### Private Mode Configuration
+```python
+# Using MCP tool
+result = await client.call_tool("setup_config", {
+    "api_key": "your-api-key",
+    "playground_url": "https://promptql.your-domain.private-ddn.hasura.app/playground",
+    "auth_token": "your-auth-token",
+    "auth_mode": "private"
+})
+```
+
+#### Checking Current Configuration
+```python
+# Check what authentication mode is currently configured
+config_result = await client.call_tool("check_config", {})
+# Returns configuration details including auth_mode
+```
 
 ### Prompts
 - **data_analysis** - Create a specialized prompt for data analysis on a specific topic
@@ -150,6 +308,30 @@ Ensure you've:
 If you have multiple Python versions installed, make sure you're using Python 3.10 or higher:
 ```bash
 python3.10 -m venv venv  # Specify the exact version
+```
+
+### Authentication Issues
+
+#### Wrong authentication mode
+If you're getting authentication errors, verify you're using the correct authentication mode:
+
+- **Public DDN deployments**: Use `--auth-mode public` (default)
+- **Private DDN deployments**: Use `--auth-mode private`
+
+Check your current configuration:
+```bash
+python -m promptql_mcp_server
+# Then use check_config tool to see current auth_mode
+```
+
+#### Switching authentication modes
+To switch between authentication modes, simply reconfigure:
+```bash
+# Switch to private mode
+python -m promptql_mcp_server setup --api-key YOUR_API_KEY --playground-url YOUR_URL --auth-token YOUR_TOKEN --auth-mode private
+
+# Switch back to public mode
+python -m promptql_mcp_server setup --api-key YOUR_API_KEY --playground-url YOUR_URL --auth-token YOUR_TOKEN --auth-mode public
 ```
 
 ## Development
@@ -190,3 +372,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - [Hasura](https://hasura.io/) for creating PromptQL
 - [Anthropic](https://www.anthropic.com/) for developing the Model Context Protocol
+
+
+## TODO
+- process the thread response properly based on interaction_id returned as part of continue_thread and start_thread in mcp_server, at the moment, it only looks for the latest interaction_id
+- process the interaction_response accordingly to figure out the code, plan and code_output
+- ensure the simple_client.py shows the cancellation_thread demo properly, the current status call looks to be blocking 
+- Validate if the artifacts are processed accordingly
